@@ -8,6 +8,8 @@ import urllib.parse
 import time
 import urllib.robotparser
 import datetime
+import lxml.html
+import csv
 
 def download(url, user_agent='wswp',proxy=None,num_retries=2):
     print('Downloading:' ,url)
@@ -43,7 +45,7 @@ def crawl_sitemap(url): #通过robots.txt中的,xml来获取整站网页
         html = download(link)
         pass
 
-def link_crawler(seed_url,link_regex ,robots_url,delay=5, max_depth=2):
+def link_crawler(seed_url,link_regex ,robots_url,delay=1, max_depth=2, scrape_callback = None):
     #通过初试链接和正则来爬网页上的所有链接，并且记录在网站池中，备用
     crawl_queue = [seed_url]
     #记住已经抓去过的链接
@@ -58,10 +60,14 @@ def link_crawler(seed_url,link_regex ,robots_url,delay=5, max_depth=2):
     while crawl_queue:
         url = crawl_queue.pop()
         if rp.can_fetch(user_agent, url):
+            #增加延迟
             throttle.wait(url)
             html = download(url)
             links = []
+            if scrape_callback:
+                links.extend(scrape_callback(url,html) or [])
 
+            #深度
             depth = seen[url]
             if depth != max_depth:
                 if link_regex:
@@ -91,7 +97,7 @@ def get_links(html):
 
 class Throttle:
     #在下载中增加延迟
-    #Throttle lei
+    #Throttle 类
     def __init__(self,delay):
         self.delay = delay
         self.domains = {}
@@ -114,6 +120,31 @@ def same_domain(url1, url2):
         """
         return urllib.parse.urlparse(url1).netloc == urllib.parse.urlparse(url2).netloc
 
+class ScrapeCallback:
+    def __init__(self):
+        self.writer = csv.writer(open('countries.csv','w'))
+        self.fields = ('places_area__row','places_population__row','places_iso__row','places_country__row',
+          'places_country__row','places_capital__row','places_continent__row'
+          , 'places_tld__row','places_currency_code__row','places_currency_name__row'
+          , 'places_phone__row','places_postal_code_format__row','places_postal_code_regex__row'
+          , 'places_languages__row','places_neighbours__row')
+        self.writer.writerow(self.fields)
+
+    def __call__(self, url, html):
+
+        if re.search('/view/', url):
+            tree = lxml.html.fromstring(html)
+            row = []
+            for field in self.fields:
+                row.append(tree.cssselect('table > tr#%s > td.w2p_fw' % field)[0].text_content())
+            self.writer.writerow(row)
+
+
+
+
+
+
+
 # url = 'http://httpstat.us/500'
 # crawl_url='http://example.webscraping.com/sitemap.xml'
 # crawl_url2='http://rss.eastmoney.com/sitemaps/stock_sitemap.xml'
@@ -123,5 +154,5 @@ robots_url = 'http://example.webscraping.com/robots.txt'
 seed_url = 'http://example.webscraping.com'
 link_regex = '/places/default/(index|view)/'
 
-#throttle.wait(seed_url+link_regex)
-link_crawler(seed_url,link_regex,robots_url)
+
+link_crawler(seed_url,link_regex,robots_url,max_depth=5, scrape_callback=ScrapeCallback())
